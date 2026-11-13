@@ -7,7 +7,6 @@
  *   expo-sensors
  *   expo-haptics
  *   expo-media-library
- *   react-native-svg
  *   @expo/vector-icons   (usually preinstalled in Snack)
  *
  * Gestures: swipe left or right on the preview to change the guide. Tap to focus.
@@ -21,7 +20,6 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { DeviceMotion } from 'expo-sensors';
 import * as Haptics from 'expo-haptics';
 import * as MediaLibrary from 'expo-media-library';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 
 const PHI = (1 + Math.sqrt(5)) / 2;
@@ -107,11 +105,23 @@ if (typeof __DEV__ !== 'undefined' && __DEV__) {
 
 const ROTATE_ORDER = [0, 1, 3, 2]; // walks the spiral's eye clockwise around the 4 corners
 
+// A straight line drawn as a thin rotated View (no SVG package needed).
+function Seg({ x1, y1, x2, y2, op = 1, w = 1, color = GUIDE }) {
+  const len = Math.hypot(x2 - x1, y2 - y1) + w; // + w closes gaps where segments meet
+  return (
+    <View
+      style={{
+        position: 'absolute', left: (x1 + x2) / 2 - len / 2, top: (y1 + y2) / 2 - w / 2,
+        width: len, height: w, backgroundColor: color, opacity: op,
+        transform: [{ rotate: `${Math.atan2(y2 - y1, x2 - x1)}rad` }],
+      }}
+    />
+  );
+}
+
 function Guides({ type, corner, W, H }) {
   if (type === 'off') return null;
-  const L = (x1, y1, x2, y2, k, op = 1) => (
-    <Line key={k} x1={x1 * W} y1={y1 * H} x2={x2 * W} y2={y2 * H} stroke={GUIDE} strokeWidth={1} strokeOpacity={op} />
-  );
+  const L = (x1, y1, x2, y2, k, op = 1) => <Seg key={k} x1={x1 * W} y1={y1 * H} x2={x2 * W} y2={y2 * H} op={op} />;
   let body;
   if (type === 'thirds' || type === 'phi') {
     const f = type === 'thirds' ? [1 / 3, 2 / 3] : [1 - 1 / PHI, 1 / PHI];
@@ -119,25 +129,26 @@ function Guides({ type, corner, W, H }) {
   } else if (type === 'diagonal') {
     body = [L(0, 0, 1, 1, 'a'), L(1, 0, 0, 1, 'b')];
   } else if (type === 'center') {
-    const cx = 0.5;
-    const cy = 0.5;
     const arm = 0.06;
     body = [
-      L(cx, 0, cx, 1, 'v', 0.5), L(0, cy, 1, cy, 'h', 0.5),
-      L(cx - arm, cy, cx + arm, cy, 'cx'), L(cx, cy - arm * (W / H), cx, cy + arm * (W / H), 'cy'),
+      L(0.5, 0, 0.5, 1, 'v', 0.5), L(0, 0.5, 1, 0.5, 'h', 0.5),
+      L(0.5 - arm, 0.5, 0.5 + arm, 0.5, 'cx'), L(0.5, 0.5 - arm * (W / H), 0.5, 0.5 + arm * (W / H), 'cy'),
     ];
   } else {
     const { arcs, boxes } = spiral(corner);
-    const d = arcs.map((p) => p.map(([x, y], i) => `${i ? 'L' : 'M'}${(x * W).toFixed(1)} ${(y * H).toFixed(1)}`).join(' ')).join(' ');
     body = [
       ...boxes.map(([[x1, y1], [x2, y2]], i) => (
-        <Rect key={`r${i}`} x={Math.min(x1, x2) * W} y={Math.min(y1, y2) * H} width={Math.abs(x2 - x1) * W}
-          height={Math.abs(y2 - y1) * H} stroke={GUIDE} strokeOpacity={0.4} strokeWidth={1} fill="none" />
+        <View key={`r${i}`} style={{
+          position: 'absolute', left: Math.min(x1, x2) * W, top: Math.min(y1, y2) * H,
+          width: Math.abs(x2 - x1) * W, height: Math.abs(y2 - y1) * H, borderWidth: 1, borderColor: GUIDE, opacity: 0.4,
+        }} />
       )),
-      <Path key="s" d={d} stroke={GUIDE} strokeWidth={1.5} fill="none" />,
+      ...arcs.flatMap((p, i) => p.slice(1).map(([x, y], j) => (
+        <Seg key={`s${i}-${j}`} x1={p[j][0] * W} y1={p[j][1] * H} x2={x * W} y2={y * H} w={1.5} />
+      ))),
     ];
   }
-  return <Svg width={W} height={H} style={StyleSheet.absoluteFill} pointerEvents="none">{body}</Svg>;
+  return <View style={StyleSheet.absoluteFill} pointerEvents="none">{body}</View>;
 }
 
 export default function App() {
@@ -293,12 +304,12 @@ export default function App() {
       {/* level: a horizon line when upright, a bubble when flat */}
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.center]}>
         {flat ? (
-          <Svg width={120} height={120}>
-            <Circle cx={60} cy={60} r={44} stroke={levelColor} strokeWidth={1} fill="none" />
-            <Line x1={50} y1={60} x2={70} y2={60} stroke={levelColor} strokeWidth={1} />
-            <Line x1={60} y1={50} x2={60} y2={70} stroke={levelColor} strokeWidth={1} />
-            <Circle cx={60 + bubble.x} cy={60 + bubble.y} r={8} fill={levelColor} fillOpacity={0.8} />
-          </Svg>
+          <View style={styles.bubbleBox}>
+            <View style={[styles.bubbleRing, { borderColor: levelColor }]} />
+            <View style={[styles.bubbleCrossH, { backgroundColor: levelColor }]} />
+            <View style={[styles.bubbleCrossV, { backgroundColor: levelColor }]} />
+            <View style={[styles.bubbleDot, { backgroundColor: levelColor, transform: [{ translateX: bubble.x }, { translateY: bubble.y }] }]} />
+          </View>
         ) : (
           <View style={{ width: horizonW, alignItems: 'center', transform: [{ rotate: `${-a.roll}deg` }] }}>
             <View style={{ width: horizonW, height: level ? 2 : 1, backgroundColor: levelColor }} />
@@ -405,6 +416,11 @@ const styles = StyleSheet.create({
   permBtn: { backgroundColor: '#fff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 22 },
   permBtnText: { color: '#000', fontSize: 16, fontWeight: '600' },
   degText: { position: 'absolute', top: '50%', marginTop: 70, fontSize: 13, fontVariant: ['tabular-nums'] },
+  bubbleBox: { width: 120, height: 120, alignItems: 'center', justifyContent: 'center' },
+  bubbleRing: { position: 'absolute', width: 88, height: 88, borderRadius: 44, borderWidth: 1 },
+  bubbleCrossH: { position: 'absolute', width: 20, height: 1 },
+  bubbleCrossV: { position: 'absolute', width: 1, height: 20 },
+  bubbleDot: { position: 'absolute', width: 16, height: 16, borderRadius: 8, opacity: 0.8 },
   tiltBar: { position: 'absolute', right: 14, width: 14, alignItems: 'center' },
   tiltTrack: { position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: 'rgba(255,255,255,0.4)' },
   tiltZero: { position: 'absolute', width: 14, height: 1, backgroundColor: 'rgba(255,255,255,0.8)' },
